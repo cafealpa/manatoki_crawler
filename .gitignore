@@ -1,3 +1,4 @@
 /download_mana/
 /.idea/
 /.venv/
+/crawled_pages.db

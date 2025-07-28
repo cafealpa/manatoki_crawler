@@ -11,8 +11,19 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from seleniumbase import Driver
 
-from config import TARGET_URL
 from database import is_url_crawled, add_crawled_url
+
+
+def handle_capcha(driver):
+    while "bbs/captcha.php" in driver.current_url:
+        print("\n" + "=" * 50)
+        print("!! 캡챠 페이지가 감지되었습니다 !!")
+        print("브라우저에서 직접 캡챠를 풀어주세요.")
+        input("완료하고 터미널에서 Enter를 누르세요.......")
+        print("=" * 50 + "\n")
+        time.sleep(2)
+
+    return
 
 
 def crawl_mana_page(driver, article_urls):
@@ -23,16 +34,25 @@ def crawl_mana_page(driver, article_urls):
             continue
 
         # 페이지 이동
-        print(f"Navigating to: {url}")
+        print(f"\nNavigating to: {url}")
         driver.get(url)
+
+        # 캡챠 페이지
+        handle_capcha(driver)
 
         # 페이지의 body 요소를 선택
         body = driver.find_element(By.TAG_NAME, "body")
 
         # 방법 A: Page Down 키를 눌러 한 화면씩 스크롤
-        for _ in range(30):
+        for _ in range(20):
             body.send_keys(Keys.PAGE_DOWN)
             time.sleep(0.1)
+
+        time.sleep(2)
+
+        for _ in range(10):
+            body.send_keys(Keys.PAGE_DOWN)
+        time.sleep(0.1)
 
         # 페이지 로딩 후 이미지 비동기 로딩 1초 대기
         # time.sleep(1)
@@ -52,6 +72,11 @@ def crawl_mana_page(driver, article_urls):
             post_title = title_element.get_text(strip=True)
             # 파일 시스템에 안전한 이름으로 변환
             post_title = "".join(c for c in post_title if c.isalnum() or c in (' ', '.', '_')).rstrip()
+
+            # 페이지 title에서 "마나토끼  일본만화 허브"제거
+            if "마나토끼  일본만화 허브" in post_title:
+                post_title = post_title.replace("마나토끼  일본만화 허브", "").strip()
+
             print(f"Post Title: {post_title}")
         else:
             post_title = "untitled_post"
@@ -73,14 +98,14 @@ def crawl_mana_page(driver, article_urls):
 
             for i, img in enumerate(img_tags):
                 img_url = img.get('src')
-                print(f"img url:{img_url}")
-
                 if img_url:
 
                     # gif 확장자가 url에 있으면 skip
                     if '.gif' in img_url.lower():
-                        print(f"Skipping GIF image: {img_url}")
+                        # print(f"Skipping GIF image: {img_url}")
                         continue
+
+                    print(f"img url:{img_url}")
 
                     # 이미지 다운로드
                     try:
@@ -114,17 +139,18 @@ def crawl_mana_page(driver, article_urls):
                     print(f"img_url is None: {img_url}")
 
             # 페이지 크롤링이 완료되었을 경우만 DB에 url 추가
-            add_crawled_url(url, title_element)
+            add_crawled_url(url, post_title)
         else:
             print("html_mana_section not found.")
 
         # 다음 페이지로 이동하기 전에 랜덤 대기 (1초 ~ 9초)
-        wait_time = random.randint(1, 9)
+        wait_time = random.randint(1, 5)
         print(f"다음 페이지로 이동하기 전 {wait_time}초 대기합니다.")
         time.sleep(wait_time)
 
+
 # 목록 조회
-def get_target_pages(driver: Driver) -> list:
+def get_target_pages(driver: Driver, target_url) -> list:
     """
         지정된 웹 페이지에서 대상 기사 URL을 추출합니다.
 
@@ -139,15 +165,15 @@ def get_target_pages(driver: Driver) -> list:
         :rtype: list
     """
     try:
-        driver.get(TARGET_URL)
-        print(f"Successfully opened {TARGET_URL}")
+        driver.get(target_url)
+        print(f"Successfully opened {target_url}")
 
         # <article itemprop="articleBody"> 요소가 로딩될 때까지 대기
-        print("Waiting for <article itemprop='articleBody'> to load...")
+        # print("Waiting for <article itemprop='articleBody'> to load...")
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "article[itemprop='articleBody']"))
         )
-        print("<article itemprop='articleBody'> loaded.")
+        # print("<article itemprop='articleBody'> loaded.")
 
         # 페이지 소스 가져오기
         page_source = driver.page_source
@@ -156,7 +182,7 @@ def get_target_pages(driver: Driver) -> list:
         # articleBody 내의 연재 목록 URL 수집
         article_body = soup.find('article', itemprop='articleBody')
         if article_body:
-            print("Found articleBody. Extracting URLs...")
+            # print("Found articleBody. Extracting URLs...")
             serial_list_div = article_body.find('div', class_='serial-list')
             if serial_list_div:
                 links = serial_list_div.find_all('a', href=True)
@@ -177,21 +203,41 @@ def get_target_pages(driver: Driver) -> list:
 
     return []
 
+
 def crawl_manatoki():
     # 다운로드 폴더 생성
     if not os.path.exists("download_mana"):
         os.makedirs("download_mana")
         print("Created download_mana directory")
 
+    input_flag = True
+    target_url = None
+
+    while input_flag:
+        target_url = input("크롤링 할 만화 목록 페이지 URL을 입력하세요: ")
+
+        if not target_url:
+            print("URL이 입력되지 않았습니다. 프로그램을 종료합니다.")
+            return
+
+        confirm_val = input(f"{target_url} 맞나요?(Y/n)")
+        if confirm_val.lower() in ["", "예", "y"]:
+            input_flag = False
+
+        continue
+
+    print("크롤링을 시작합니다.")
+
     driver = Driver(uc=True)  # uc=True for undetected_chromedriver
     try:
         # 목록 조회
-        article_target_list = get_target_pages(driver)
+        article_target_list = get_target_pages(driver, target_url)
         # 조회된 목록으로 크롤링 실행
         crawl_mana_page(driver, article_target_list)
-
+        print("크롤링이 완료 되었습니다.")
     finally:
         driver.quit()
+
 
 if __name__ == "__main__":
     crawl_manatoki()
