@@ -1,0 +1,1 @@
+TARGET_URL = "https://manatoki468.net/comic/2786463"
