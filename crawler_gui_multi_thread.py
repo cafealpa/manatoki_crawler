@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading
 import queue
 import concurrent.futures
@@ -29,8 +29,16 @@ def log(message):
     log_text.see(tk.END)
     root.update_idletasks()
 
+
+def browse_directory():
+    """Opens a dialog to select a download directory."""
+    path = filedialog.askdirectory()
+    if path:
+        download_path_entry.delete(0, tk.END)
+        download_path_entry.insert(0, path)
+
 # --- Crawler Functions ---
-def scroll_to_bottom_with_pagedown(driver, max_scrolls=50, sleep_time=0.2):
+def scroll_to_bottom_with_pagedown(driver, max_scrolls=80, sleep_time=0.2):
     # log("페이지의 끝까지 스크롤을 시작합니다...")
     body = driver.find_element(By.TAG_NAME, "body")
     scroll_count = 0
@@ -56,7 +64,7 @@ def handle_captcha(driver, worker_id):
         log(f"워커 {worker_id}: 캡챠가 해결되었습니다.")
         time.sleep(2)
 
-def crawl_worker(worker_id):
+def crawl_worker(worker_id, base_download_path):
     """The function each thread will execute to crawl pages."""
     time.sleep(worker_id * 2) # Stagger driver initialization
     driver = None
@@ -99,7 +107,7 @@ def crawl_worker(worker_id):
                     post_title = f"untitled_post_{random.randint(1000, 9999)}"
                 log(f"워커 {worker_id}: Post Title: {post_title}")
 
-                download_dir = os.path.join("download_mana", post_title)
+                download_dir = os.path.join(base_download_path, post_title)
                 os.makedirs(download_dir, exist_ok=True)
 
                 html_mana_section = soup.find('section', itemtype='http://schema.org/NewsArticle')
@@ -170,6 +178,12 @@ def master_crawl_thread():
         messagebox.showerror("오류", "URL을 입력하세요.")
         return
 
+    download_path = download_path_entry.get()
+    if not download_path:
+        download_path = "download_mana"
+        log(f"다운로드 경로가 지정되지 않아 기본 폴더 '{download_path}'에 저장합니다.")
+    os.makedirs(download_path, exist_ok=True)
+
     crawl_type = url_type.get()
     if crawl_type != "목록":
         messagebox.showinfo("알림", "현재 '목록' 유형만 지원합니다.")
@@ -214,7 +228,7 @@ def master_crawl_thread():
     log(f"{crawl_queue.qsize()}개의 작업을 {num_threads}개의 스레드로 시작합니다.")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = [executor.submit(crawl_worker, i + 1) for i in range(num_threads)]
+        futures = [executor.submit(crawl_worker, i + 1, download_path) for i in range(num_threads)]
 
         while not crawl_queue.empty() and not stop_event.is_set():
             progress = (total_articles - crawl_queue.qsize()) / total_articles * 100
@@ -279,6 +293,17 @@ url_label = ttk.Label(top_frame, text="URL:")
 url_label.pack(side='left', padx=(0, 5))
 url_entry = ttk.Entry(top_frame)
 url_entry.pack(side='left', fill='x', expand=True)
+
+# --- Download Path Frame ---
+path_frame = ttk.Frame(root)
+path_frame.pack(pady=5, padx=10, fill='x', expand=False)
+
+path_label = ttk.Label(path_frame, text="다운로드 경로:")
+path_label.pack(side='left', padx=(0, 5))
+download_path_entry = ttk.Entry(path_frame)
+download_path_entry.pack(side='left', fill='x', expand=True)
+browse_button = ttk.Button(path_frame, text="찾아보기...", command=browse_directory)
+browse_button.pack(side='left', padx=(5, 0))
 
 # --- Control Frame ---
 control_frame = ttk.Frame(root)
