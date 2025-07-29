@@ -14,6 +14,45 @@ from seleniumbase import Driver
 from database import is_url_crawled, add_crawled_url
 
 
+def scroll_to_bottom_with_pagedown(driver, max_scrolls=50, sleep_time=0.2):
+    """
+    PAGE_DOWN 키를 사용하여 페이지의 마지막까지 스크롤합니다.
+    스크롤 위치가 더 이상 변하지 않으면 중단합니다.
+
+    Args:
+        driver: Selenium 드라이버 객체.
+        max_scrolls (int): 무한 루프를 방지하기 위한 최대 스크롤 횟수.
+        sleep_time (float): 각 스크롤 사이의 대기 시간 (초).
+    """
+    print("페이지의 끝까지 스크롤을 시작합니다...")
+    body = driver.find_element(By.TAG_NAME, "body")
+    scroll_count = 0
+
+    while scroll_count < max_scrolls:
+        # 스크롤 전의 수직 스크롤 위치를 기록
+        last_scroll_y = driver.execute_script("return window.scrollY")
+
+        # 페이지 다운 키 입력
+        body.send_keys(Keys.PAGE_DOWN)
+        scroll_count += 1
+
+        # 새 콘텐츠가 로드될 시간을 줌
+        time.sleep(sleep_time)
+
+        # 스크롤 후의 수직 스크롤 위치를 확인
+        new_scroll_y = driver.execute_script("return window.scrollY")
+
+        # 스크롤 위치에 변화가 없다면, 페이지의 끝에 도달한 것임
+        if new_scroll_y == last_scroll_y:
+            print("페이지의 마지막에 도달하여 스크롤을 중단합니다.")
+            break
+    else:
+        # while 루프가 break 없이 정상적으로 종료되었을 때 (최대 횟수 도달)
+        print(f"최대 스크롤 횟수({max_scrolls})에 도달했습니다.")
+
+    # 모든 콘텐츠가 확실히 로드되도록 마지막에 추가 대기
+    time.sleep(2)
+
 def handle_capcha(driver):
     while "bbs/captcha.php" in driver.current_url:
         print("\n" + "=" * 50)
@@ -44,15 +83,18 @@ def crawl_mana_page(driver, article_urls):
         body = driver.find_element(By.TAG_NAME, "body")
 
         # 방법 A: Page Down 키를 눌러 한 화면씩 스크롤
-        for _ in range(20):
-            body.send_keys(Keys.PAGE_DOWN)
-            time.sleep(0.1)
+        # for _ in range(20):
+        #     body.send_keys(Keys.PAGE_DOWN)
+        #     time.sleep(0.1)
+        #
+        # time.sleep(2)
+        #
+        # for _ in range(10):
+        #     body.send_keys(Keys.PAGE_DOWN)
+        # time.sleep(0.1)
 
-        time.sleep(2)
-
-        for _ in range(10):
-            body.send_keys(Keys.PAGE_DOWN)
-        time.sleep(0.1)
+        # 페이지 끝까지 스크롤
+        scroll_to_bottom_with_pagedown(driver)
 
         # 페이지 로딩 후 이미지 비동기 로딩 1초 대기
         # time.sleep(1)
@@ -210,10 +252,10 @@ def crawl_manatoki():
         os.makedirs("download_mana")
         print("Created download_mana directory")
 
-    input_flag = True
+    url_input_flag = True
     target_url = None
 
-    while input_flag:
+    while url_input_flag:
         target_url = input("크롤링 할 만화 목록 페이지 URL을 입력하세요: ")
 
         if not target_url:
@@ -222,7 +264,7 @@ def crawl_manatoki():
 
         confirm_val = input(f"{target_url} 맞나요?(Y/n)")
         if confirm_val.lower() in ["", "예", "y"]:
-            input_flag = False
+            url_input_flag = False
 
         continue
 
@@ -234,7 +276,7 @@ def crawl_manatoki():
         article_target_list = get_target_pages(driver, target_url)
         # 조회된 목록으로 크롤링 실행
         crawl_mana_page(driver, article_target_list)
-        print("크롤링이 완료 되었습니다.")
+        print("\n\n🎉🎉🎉 크롤링이 완료 되었습니다.")
     finally:
         driver.quit()
 
