@@ -439,11 +439,25 @@ def on_closing():
         root.destroy()
 
 
+def show_version():
+    """'버전확인' 메뉴 클릭 시 호출되어 버전 정보를 담은 메시지 박스를 표시합니다."""
+    messagebox.showinfo("버전 정보", "마나토끼 멀티스레드 크롤러 v1.0.1")
+
 
 # --- UI Setup ---
 root = tk.Tk()
 root.title("마나토끼 멀티스레드 크롤러")
 root.geometry("700x500")
+
+# --- Menu Bar ---
+menu_bar = tk.Menu(root)
+
+# '기타' 메뉴
+etc_menu = tk.Menu(menu_bar, tearoff=0)
+etc_menu.add_command(label="버전확인", command=show_version)
+menu_bar.add_cascade(label="기타", menu=etc_menu)
+
+root.config(menu=menu_bar)
 
 # --- Top Frame ---
 top_frame = ttk.Frame(root)
