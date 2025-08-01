@@ -4,7 +4,6 @@ import os
 import random
 import threading
 import time
-from tkinter import messagebox
 
 import requests
 from bs4 import BeautifulSoup
@@ -16,8 +15,6 @@ from seleniumbase import Driver
 
 from database import is_url_crawled, add_crawled_url
 
-stop_event = threading.Event()
-
 
 def create_text_file(download_path, content, file_name="list_url.txt"):
     abs_path = os.path.join(download_path, file_name)
@@ -26,7 +23,7 @@ def create_text_file(download_path, content, file_name="list_url.txt"):
             file.write(content)
 
 
-def scroll_to_bottom_with_pagedown(driver, max_scrolls=500, sleep_time=0.2):
+def scroll_to_bottom_with_pagedown(driver, stop_event, max_scrolls=500, sleep_time=0.2):
     body = driver.find_element(By.TAG_NAME, "body")
     scroll_count = 0
     while scroll_count < max_scrolls and not stop_event.is_set():
@@ -37,13 +34,10 @@ def scroll_to_bottom_with_pagedown(driver, max_scrolls=500, sleep_time=0.2):
         new_scroll_y = driver.execute_script("return window.scrollY")
         if new_scroll_y == last_scroll_y:
             break
-    else:
-        # log(f"최대 스크롤 횟수({max_scrolls})에 도달했습니다.")
-        pass
     time.sleep(2)
 
 
-def handle_captcha(driver, worker_id, log_callback):
+def handle_captcha(driver, worker_id, log_callback, stop_event):
     while "bbs/captcha.php" in driver.current_url and not stop_event.is_set():
         log_callback(f"워커 {worker_id}: !! 캡챠 페이지가 감지되었습니다 !! 브라우저에서 직접 해결해주세요.")
         while "bbs/captcha.php" in driver.current_url:
@@ -53,7 +47,7 @@ def handle_captcha(driver, worker_id, log_callback):
         time.sleep(2)
 
 
-def crawl_worker(worker_id, base_download_path, url_list, log_callback):
+def crawl_worker(worker_id, base_download_path, url_list, log_callback, stop_event):
     result = []
     if not url_list:
         return result
@@ -80,10 +74,10 @@ def crawl_worker(worker_id, base_download_path, url_list, log_callback):
                         EC.presence_of_element_located((By.CSS_SELECTOR, "article[itemprop='articleBody']"))
                     )
 
-                    handle_captcha(driver, worker_id, log_callback)
+                    handle_captcha(driver, worker_id, log_callback, stop_event)
                     if stop_event.is_set(): break
 
-                    scroll_to_bottom_with_pagedown(driver)
+                    scroll_to_bottom_with_pagedown(driver, stop_event)
 
                     page_source = driver.page_source
                     soup = BeautifulSoup(page_source, 'html.parser')
@@ -164,7 +158,7 @@ def get_target_pages(driver, target_url, log_callback):
         return []
 
 
-def master_crawl_thread(params, gui_queue):
+def master_crawl_thread(params, gui_queue, stop_event):
     def log_callback(message):
         gui_queue.put(('log', message))
 
@@ -174,12 +168,20 @@ def master_crawl_thread(params, gui_queue):
     def on_complete_callback(success):
         gui_queue.put(('complete', success))
 
+    def show_info_callback(message):
+        gui_queue.put(('show_info', message))
+
     target_url = params['target_url']
     download_path = params['download_path']
-    num_threads = params['num_threads']
+
+    num_threads = 3;
+    if 'num_threads' in params and isinstance(params['num_threads'], str) and params['num_threads'].isdigit():
+        num_threads = int(params['num_threads'])
+    else:
+        # 위의 조건에 맞지 않으면 기본값을 사용합니다.
+        print("Warning: 'num_threads' value is not a positive integer string. Using default value.")
 
     log_callback("크롤링을 시작합니다...")
-    stop_event.clear()
 
     list_driver = None
     try:
@@ -191,7 +193,7 @@ def master_crawl_thread(params, gui_queue):
 
     if not article_urls:
         log_callback("크롤링할 에피소드가 없습니다.")
-        on_complete_callback(False) # Indicate completion without success
+        on_complete_callback(False)
         return
 
     create_text_file(download_path, target_url)
@@ -228,7 +230,7 @@ def master_crawl_thread(params, gui_queue):
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
         future_to_url = {
-            executor.submit(crawl_worker, worker_id, download_path, url_list_for_worker, log_callback): url_list_for_worker
+            executor.submit(crawl_worker, worker_id, download_path, url_list_for_worker, log_callback, stop_event): url_list_for_worker
             for worker_id, url_list_for_worker in worker_urls.items()
         }
 
@@ -258,9 +260,9 @@ def master_crawl_thread(params, gui_queue):
     if not stop_event.is_set():
         update_progress_callback(100)
         log_callback("\n\n🎉🎉🎉 모든 크롤링 작업이 완료되었습니다.")
-        messagebox.showinfo("완료", "크롤링이 완료되었습니다.")
+        show_info_callback("크롤링이 완료되었습니다.")
     else:
         log_callback("크롤링 작업이 중지되었습니다.")
-        messagebox.showinfo("중지", "크롤링이 중지되었습니다.")
+        show_info_callback("크롤링이 중지되었습니다.")
 
     on_complete_callback(True)

@@ -33,8 +33,8 @@ class CrawlerApp(tk.Toplevel):
         path_label.pack(side='left', padx=(0, 5))
         self.download_path_entry = ttk.Entry(path_frame)
         self.download_path_entry.pack(side='left', fill='x', expand=True)
-        browse_button = ttk.Button(path_frame, text="찾아보기...", command=self.browse_directory)
-        browse_button.pack(side='left', padx=(5, 0))
+        self.browse_button = ttk.Button(path_frame, text="찾아보기...", command=self.browse_directory)
+        self.browse_button.pack(side='left', padx=(5, 0))
 
         # --- Top Frame ---
         top_frame = ttk.Frame(self)
@@ -104,45 +104,43 @@ class CrawlerApp(tk.Toplevel):
                             self.url_entry.delete(0, tk.END)
                             self.url_entry.insert(0, url)
                 except Exception as e:
-                    self.log(f"\'list_url.txt\' 파일 읽기 오류: {e}")
+                    self.log(f"'list_url.txt' 파일 읽기 오류: {e}")
 
     def show_version(self):
-        messagebox.showinfo("버전 정보", "마나토끼 마나토끼 수집기 v1.0.0")
-
-    def on_closing(self):
-        if messagebox.askokcancel("종료", "마나토끼 수집기를 종료하시겠습니까?"):
-            self.stop_callback()
-            self.destroy()
+        messagebox.showinfo("버전 정보", "마나토끼 마나토끼 수집기 v1.0.1")
 
     def get_params(self):
+        """UI에서 파라미터를 가져와 딕셔너리로 반환합니다."""
         return {
             'target_url': self.url_entry.get(),
             'download_path': self.download_path_entry.get(),
-            'num_threads': int(self.num_threads_entry.get()),
-            'log_callback': self.log,
-            'update_progress_callback': self.update_progress,
-            'on_complete_callback': self.on_crawl_complete
+            'num_threads': self.num_threads_entry.get(),
         }
 
     def update_progress(self, value):
         self.progress_bar['value'] = value
         self.update_idletasks()
 
-    def on_crawl_complete(self, success):
-        self.start_button.config(state=tk.NORMAL)
-        self.stop_button.config(state=tk.DISABLED)
-
     def set_ui_state(self, state):
         """UI 컨트롤의 상태를 변경합니다 (예: 버튼 활성화/비활성화)"""
         if state == 'start':
+            self.download_path_entry.config(state=tk.DISABLED)
+            self.browse_button.config(state=tk.DISABLED)
+            self.url_entry.config(state=tk.DISABLED)
+            self.num_threads_entry.config(state=tk.DISABLED)
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
+
         elif state == 'stop':
+            self.download_path_entry.config(state=tk.NORMAL)
+            self.browse_button.config(state=tk.NORMAL)
+            self.url_entry.config(state=tk.NORMAL)
+            self.num_threads_entry.config(state=tk.NORMAL)
             self.start_button.config(state=tk.NORMAL)
             self.stop_button.config(state=tk.DISABLED)
 
     def process_queue(self):
-        """GUI 큐를 확인하고 메시지를 처리합니다."""
+        """GUI 큐를 주기적으로 확인하고 모든 메시지를 처리합니다."""
         try:
             while not self.gui_queue.empty():
                 msg_type, data = self.gui_queue.get_nowait()
@@ -151,7 +149,9 @@ class CrawlerApp(tk.Toplevel):
                 elif msg_type == 'progress':
                     self.update_progress(data)
                 elif msg_type == 'complete':
-                    self.on_crawl_complete(data)
+                    self.set_ui_state('stop')
+                elif msg_type == 'show_info':
+                    messagebox.showinfo("알림", data)
         except queue.Empty:
             pass
         finally:
