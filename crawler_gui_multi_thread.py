@@ -1,26 +1,28 @@
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox, filedialog
-import threading
-import queue
 import concurrent.futures
 import mimetypes
 import os
 import random
+import threading
 import time
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox, filedialog
+
 import requests
-import sys
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from seleniumbase import Driver
+
 from database import is_url_crawled, add_crawled_url
 
 # --- Global Variables ---
 master_thread = None
 stop_event = threading.Event()
-crawl_queue = queue.Queue()
+
+
+# crawl_queue = queue.Queue()
 
 # --- Logging Function ---
 def log(message):
@@ -36,6 +38,7 @@ def browse_directory():
     if path:
         download_path_entry.delete(0, tk.END)
         download_path_entry.insert(0, path)
+
 
 # --- Crawler Functions ---
 def scroll_to_bottom_with_pagedown(driver, max_scrolls=80, sleep_time=0.2):
@@ -55,6 +58,7 @@ def scroll_to_bottom_with_pagedown(driver, max_scrolls=80, sleep_time=0.2):
         log(f"최대 스크롤 횟수({max_scrolls})에 도달했습니다.")
     time.sleep(2)
 
+
 def handle_captcha(driver, worker_id):
     while "bbs/captcha.php" in driver.current_url and not stop_event.is_set():
         log(f"워커 {worker_id}: !! 캡챠 페이지가 감지되었습니다 !! 브라우저에서 직접 해결해주세요.")
@@ -64,85 +68,90 @@ def handle_captcha(driver, worker_id):
         log(f"워커 {worker_id}: 캡챠가 해결되었습니다.")
         time.sleep(2)
 
-def crawl_worker(worker_id, base_download_path):
+
+def crawl_worker(worker_id, base_download_path, url_list):
     """The function each thread will execute to crawl pages."""
-    time.sleep(worker_id * 2) # Stagger driver initialization
+    time.sleep(worker_id * 5)  # Stagger driver initialization
     driver = None
     try:
+
+        result = []
+
         driver = Driver(uc=True, headless=False)
         while not stop_event.is_set():
-            try:
-                url = crawl_queue.get(timeout=1)
-                if url is None: # Poison pill
-                    break
-            except queue.Empty:
-                continue # Check stop_event again
+            for url in url_list:
+                # url = crawl_queue.get(timeout=1)
+                if len(url_list) == 0:
+                    continue  # Check stop_event again
 
-            try:
-                if is_url_crawled(url):
-                    log(f"워커 {worker_id}: 이미 크롤링된 URL입니다: {url}")
-                    continue
+                try:
+                    # if is_url_crawled(url):
+                    #     log(f"워커 {worker_id}: 이미 크롤링된 URL입니다: {url}")
+                    #     continue
 
-                log(f"워커 {worker_id}: Navigating to: {url}")
-                driver.get(url)
+                    log(f"워커 {worker_id}: Navigating to: {url}")
+                    driver.get(url)
 
-                WebDriverWait(driver, 30).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "article[itemprop='articleBody']"))
-                )
+                    WebDriverWait(driver, 30).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "article[itemprop='articleBody']"))
+                    )
 
-                handle_captcha(driver, worker_id)
-                if stop_event.is_set(): break
+                    handle_captcha(driver, worker_id)
+                    if stop_event.is_set(): break
 
-                scroll_to_bottom_with_pagedown(driver)
+                    scroll_to_bottom_with_pagedown(driver)
 
-                page_source = driver.page_source
-                soup = BeautifulSoup(page_source, 'html.parser')
+                    page_source = driver.page_source
+                    soup = BeautifulSoup(page_source, 'html.parser')
 
-                title_element = soup.find('h1') or soup.find('div', class_='view-title')
-                if title_element:
-                    post_title = title_element.get_text(strip=True)
-                    if "마나토끼 -" in post_title:
-                        post_title = post_title.replace(" > 마나토끼 - 일본만화 허브", "").strip()
-                else:
-                    post_title = f"untitled_post_{random.randint(1000, 9999)}"
-                log(f"워커 {worker_id}: Post Title: {post_title}")
+                    title_element = soup.find('h1') or soup.find('div', class_='view-title')
+                    if title_element:
+                        post_title = title_element.get_text(strip=True)
+                        if "마나토끼 -" in post_title:
+                            post_title = post_title.replace(" > 마나토끼 - 일본만화 허브", "").strip()
+                    else:
+                        post_title = f"untitled_post_{random.randint(1000, 9999)}"
+                    log(f"워커 {worker_id}: Post Title: {post_title}")
 
-                download_dir = os.path.join(base_download_path, post_title)
-                os.makedirs(download_dir, exist_ok=True)
+                    download_dir = os.path.join(base_download_path, post_title)
+                    os.makedirs(download_dir, exist_ok=True)
 
-                html_mana_section = soup.find('section', itemtype='http://schema.org/NewsArticle')
-                if html_mana_section:
-                    img_tags = html_mana_section.find_all('img')
-                    log(f"워커 {worker_id}: Found {len(img_tags)} images.")
+                    html_mana_section = soup.find('section', itemtype='http://schema.org/NewsArticle')
+                    if html_mana_section:
+                        img_tags = html_mana_section.find_all('img')
+                        log(f"워커 {worker_id}: Found {len(img_tags)} images.")
 
-                    for i, img in enumerate(img_tags):
-                        if stop_event.is_set(): break
-                        img_url = img.get('src')
-                        if img_url and '.gif' not in img_url.lower():
-                            try:
-                                header = {'referer': 'https://manatoki468.net/'}
-                                response = requests.get(img_url, stream=True, headers=header, timeout=30)
-                                response.raise_for_status()
+                        for i, img in enumerate(img_tags):
+                            if stop_event.is_set(): break
+                            img_url = img.get('src')
+                            if img_url and '.gif' not in img_url.lower():
+                                try:
+                                    header = {'referer': 'https://manatoki468.net/'}
+                                    response = requests.get(img_url, stream=True, headers=header, timeout=30)
+                                    response.raise_for_status()
 
-                                content_type = response.headers.get('Content-Type')
-                                ext = mimetypes.guess_extension(content_type) or os.path.splitext(img_url)[1] or ".jpg"
-                                img_filename = os.path.join(download_dir, f"{i + 1:03d}{ext}")
-                                with open(img_filename, 'wb') as f:
-                                    f.write(response.content)
-                                # log(f"워커 {worker_id}: Downloaded {img_filename}")
-                            except requests.exceptions.RequestException as req_err:
-                                log(f"워커 {worker_id}: Error downloading {img_url}: {req_err}")
-                    
-                    if not stop_event.is_set():
-                        add_crawled_url(url, post_title)
-                        log(f"워커 {worker_id}: [SUCCESS] 크롤링 완료 - {post_title}")
-                else:
-                    log(f"워커 {worker_id}: [FAIL] mana_section이 없습니다. {url}")
+                                    content_type = response.headers.get('Content-Type')
+                                    ext = mimetypes.guess_extension(content_type) or os.path.splitext(img_url)[1] or ".jpg"
+                                    img_filename = os.path.join(download_dir, f"{i + 1:03d}{ext}")
+                                    with open(img_filename, 'wb') as f:
+                                        f.write(response.content)
+                                    # log(f"워커 {worker_id}: Downloaded {img_filename}")
+                                except requests.exceptions.RequestException as req_err:
+                                    log(f"워커 {worker_id}: Error downloading {img_url}: {req_err}")
 
-            except Exception as e:
-                log(f"워커 {worker_id}: [FAIL] 처리 중 오류 발생 {url}. {e}")
-            finally:
-                crawl_queue.task_done()
+                        if not stop_event.is_set():
+                            add_crawled_url(url, post_title)
+                            log(f"워커 {worker_id}: [SUCCESS] 크롤링 완료 - {post_title}")
+                            result.append({"state": "SUCCESS", "message": "성공", "title": post_title, "url": url})
+                    else:
+                        log(f"워커 {worker_id}: [FAIL] mana_section이 없습니다. {url}")
+                        result.append({"state": "STOPED", "message": "mana_section이 없습니다.", "title": post_title, "url": url})
+
+                except Exception as e:
+                    log(f"워커 {worker_id}: [FAIL] 처리 중 오류 발생 {url}. {e}")
+                    result.append({"state": "FAIL", "message": f"[FAIL] 처리 중 오류 발생. {e}", "title": post_title, "url": url})
+        # future 반환
+        return result
     finally:
         if driver:
             driver.quit()
@@ -172,6 +181,7 @@ def get_target_pages(driver, target_url):
         log(f"목록 페이지 로딩 중 에러가 발생했습니다: {e}")
         return []
 
+
 def master_crawl_thread():
     target_url = url_entry.get()
     if not target_url:
@@ -188,7 +198,7 @@ def master_crawl_thread():
     if crawl_type != "목록":
         messagebox.showinfo("알림", "현재 '목록' 유형만 지원합니다.")
         return
-        
+
     try:
         num_threads = int(num_threads_entry.get())
         if not 1 <= num_threads <= 10:
@@ -204,8 +214,8 @@ def master_crawl_thread():
     stop_event.clear()
 
     # Clear queue from previous runs
-    while not crawl_queue.empty():
-        crawl_queue.get_nowait()
+    # while not crawl_queue.empty():
+    #     crawl_queue.get_nowait()
 
     list_driver = None
     try:
@@ -221,30 +231,73 @@ def master_crawl_thread():
         stop_button.config(state=tk.DISABLED)
         return
 
+    # 수집된 URL 중 이미 수집된 URL 제외
     total_articles = len(article_urls)
-    for url in article_urls:
-        crawl_queue.put(url)
+    crawled_urls = 0
+    target_article_urls = []
 
-    log(f"{crawl_queue.qsize()}개의 작업을 {num_threads}개의 스레드로 시작합니다.")
+    for url in article_urls:
+        if is_url_crawled(url):
+            crawled_urls += 1
+        else:
+            target_article_urls.append(url)
+
+    target_article_num = len(target_article_urls)
+
+    # for url in target_article_urls:
+    #     crawl_queue.put(url)
+
+    log(f"총 {total_articles}개중 이미 수집완료된 {crawled_urls}개는 제외합니다.")
+    log(f"{len(target_article_urls)}개의 작업을 {num_threads}개의 스레드로 시작합니다.")
+
+    completed_tasks = 0
+    success_count = 0
+    failed_count = 0
+
+    # target_article_urls을 (i % num_threads) + 1 값으로 분류해서 List로 만듭니다.
+    # 각 워커에 할당될 URL 리스트를 저장할 딕셔너리
+    worker_urls = {i + 1: [] for i in range(num_threads)}
+
+    # URL을 워커 ID에 따라 분배
+    for i, url in enumerate(target_article_urls):
+        worker_id = (i % num_threads) + 1
+        worker_urls[worker_id].append(url)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = [executor.submit(crawl_worker, i + 1, download_path) for i in range(num_threads)]
+        future_to_url = {
+            executor.submit(crawl_worker, worker_id, download_path, url_list_for_worker): url_list_for_worker
+            for worker_id, url_list_for_worker in worker_urls.items()
+        }
 
-        while not crawl_queue.empty() and not stop_event.is_set():
-            progress = (total_articles - crawl_queue.qsize()) / total_articles * 100
+        for future in concurrent.futures.as_completed(future_to_url):
+            # Signal workers to stop
+            if stop_event.is_set():
+                # 중지
+                break
+
+            completed_tasks += 1
+            try:
+                # 워커의 return 값을 가져옵니다.
+                result_list = future.result()
+                for result in result_list:
+                    if result["status"] == "SUCCESS":
+                        success_count += 1
+                        log(f"[성공] {result["message"]}")
+                    elif result["status"] == "FAILED":
+                        failed_count += 1
+                        log(f"[실패] {result["message"]}")
+                    elif result["status"] == "SKIPPED":
+                        # 이 경우는 미리 필터링해서 발생하지 않지만, 안정성을 위해 둡니다.
+                        log(f"[건너뜀] {result["message"]}")
+
+            except Exception as exc:
+                # future.result() 자체에서 예외가 발생한 경우 (매우 드묾)
+                failed_count += 1
+                log(f"[치명적 오류] {future_to_url[future]}: {exc}")
+
+            # 진행률을 정확하게 업데이트
+            progress = (completed_tasks / target_article_num) * 100
             progress_bar['value'] = progress
-            time.sleep(1)
-        
-        # Signal workers to stop
-        if stop_event.is_set():
-            # Clear the queue and send poison pills
-            while not crawl_queue.empty():
-                crawl_queue.get_nowait()
-            for _ in range(num_threads):
-                crawl_queue.put(None)
-        else: # Normal completion
-             crawl_queue.join()
-
 
     if not stop_event.is_set():
         progress_bar['value'] = 100
@@ -253,7 +306,6 @@ def master_crawl_thread():
     else:
         log("크롤링 작업이 중지되었습니다.")
         messagebox.showinfo("중지", "크롤링이 중지되었습니다.")
-
 
     start_button.config(state=tk.NORMAL)
     stop_button.config(state=tk.DISABLED)
@@ -266,10 +318,12 @@ def start_crawling():
     master_thread.daemon = True
     master_thread.start()
 
+
 def stop_crawling():
     if master_thread and master_thread.is_alive():
         log("크롤링 중지를 요청했습니다...")
         stop_event.set()
+
 
 def on_closing():
     if messagebox.askokcancel("종료", "크롤러를 종료하시겠습니까?"):
@@ -327,7 +381,7 @@ num_threads_label = ttk.Label(control_frame, text="스레드 개수:")
 num_threads_label.pack(side='left', padx=(0, 5))
 num_threads_entry = ttk.Entry(control_frame, width=5)
 num_threads_entry.pack(side='left')
-num_threads_entry.insert(0, "3") # Default value
+num_threads_entry.insert(0, "3")  # Default value
 
 # --- Button Frame ---
 button_frame = ttk.Frame(root)
