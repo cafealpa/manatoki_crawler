@@ -1,17 +1,21 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
+import os
+import queue
 
-class CrawlerApp(tk.Tk):
-    def __init__(self, start_callback, stop_callback):
-        super().__init__()
-        self.start_callback = start_callback
-        self.stop_callback = stop_callback
-
-        self.title("마나토끼 멀티스레드 크롤러")
+class CrawlerApp(tk.Toplevel):
+    def __init__(self, master, start_callback, stop_callback, on_close_callback):
+        super().__init__(master)
+        self.title("마나토끼 수집기")
         self.geometry("700x500")
 
+        self.start_callback = start_callback
+        self.stop_callback = stop_callback
+        self.gui_queue = queue.Queue()
+
         self._create_widgets()
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.protocol("WM_DELETE_WINDOW", on_close_callback)
+        self.process_queue()
 
     def _create_widgets(self):
         # --- Menu Bar ---
@@ -20,15 +24,6 @@ class CrawlerApp(tk.Tk):
         etc_menu.add_command(label="버전확인", command=self.show_version)
         menu_bar.add_cascade(label="기타", menu=etc_menu)
         self.config(menu=menu_bar)
-
-        # --- Top Frame ---
-        top_frame = ttk.Frame(self)
-        top_frame.pack(pady=5, padx=10, fill='x', expand=False)
-
-        url_label = ttk.Label(top_frame, text="URL:")
-        url_label.pack(side='left', padx=(0, 5))
-        self.url_entry = ttk.Entry(top_frame)
-        self.url_entry.pack(side='left', fill='x', expand=True)
 
         # --- Download Path Frame ---
         path_frame = ttk.Frame(self)
@@ -40,6 +35,15 @@ class CrawlerApp(tk.Tk):
         self.download_path_entry.pack(side='left', fill='x', expand=True)
         browse_button = ttk.Button(path_frame, text="찾아보기...", command=self.browse_directory)
         browse_button.pack(side='left', padx=(5, 0))
+
+        # --- Top Frame ---
+        top_frame = ttk.Frame(self)
+        top_frame.pack(pady=5, padx=10, fill='x', expand=False)
+
+        url_label = ttk.Label(top_frame, text="URL:")
+        url_label.pack(side='left', padx=(0, 5))
+        self.url_entry = ttk.Entry(top_frame)
+        self.url_entry.pack(side='left', fill='x', expand=True)
 
         # --- Control Frame ---
         control_frame = ttk.Frame(self)
@@ -91,12 +95,22 @@ class CrawlerApp(tk.Tk):
         if path:
             self.download_path_entry.delete(0, tk.END)
             self.download_path_entry.insert(0, path)
+            list_url_path = os.path.join(path, "list_url.txt")
+            if os.path.exists(list_url_path):
+                try:
+                    with open(list_url_path, 'r', encoding='utf-8') as f:
+                        url = f.read().strip()
+                        if url:
+                            self.url_entry.delete(0, tk.END)
+                            self.url_entry.insert(0, url)
+                except Exception as e:
+                    self.log(f"\'list_url.txt\' 파일 읽기 오류: {e}")
 
     def show_version(self):
-        messagebox.showinfo("버전 정보", "마나토끼 멀티스레드 크롤러 v1.0")
+        messagebox.showinfo("버전 정보", "마나토끼 마나토끼 수집기 v1.0.0")
 
     def on_closing(self):
-        if messagebox.askokcancel("종료", "크롤러를 종료하시겠습니까?"):
+        if messagebox.askokcancel("종료", "마나토끼 수집기를 종료하시겠습니까?"):
             self.stop_callback()
             self.destroy()
 
@@ -117,3 +131,28 @@ class CrawlerApp(tk.Tk):
     def on_crawl_complete(self, success):
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
+
+    def set_ui_state(self, state):
+        """UI 컨트롤의 상태를 변경합니다 (예: 버튼 활성화/비활성화)"""
+        if state == 'start':
+            self.start_button.config(state=tk.DISABLED)
+            self.stop_button.config(state=tk.NORMAL)
+        elif state == 'stop':
+            self.start_button.config(state=tk.NORMAL)
+            self.stop_button.config(state=tk.DISABLED)
+
+    def process_queue(self):
+        """GUI 큐를 확인하고 메시지를 처리합니다."""
+        try:
+            while not self.gui_queue.empty():
+                msg_type, data = self.gui_queue.get_nowait()
+                if msg_type == 'log':
+                    self.log(data)
+                elif msg_type == 'progress':
+                    self.update_progress(data)
+                elif msg_type == 'complete':
+                    self.on_crawl_complete(data)
+        except queue.Empty:
+            pass
+        finally:
+            self.after(100, self.process_queue)

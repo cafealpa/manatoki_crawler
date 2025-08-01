@@ -164,13 +164,19 @@ def get_target_pages(driver, target_url, log_callback):
         return []
 
 
-def master_crawl_thread(params):
+def master_crawl_thread(params, gui_queue):
+    def log_callback(message):
+        gui_queue.put(('log', message))
+
+    def update_progress_callback(progress):
+        gui_queue.put(('progress', progress))
+
+    def on_complete_callback(success):
+        gui_queue.put(('complete', success))
+
     target_url = params['target_url']
     download_path = params['download_path']
     num_threads = params['num_threads']
-    log_callback = params['log_callback']
-    update_progress_callback = params['update_progress_callback']
-    on_complete_callback = params['on_complete_callback']
 
     log_callback("크롤링을 시작합니다...")
     stop_event.clear()
