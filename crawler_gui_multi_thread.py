@@ -26,14 +26,44 @@ stop_event = threading.Event()
 
 # --- Logging Function ---
 def log(message):
-    """Inserts a message into the log text area in a thread-safe way."""
+    """GUI의 로그 텍스트 영역에 메시지를 추가합니다.
+
+    스레드 환경에서 안전하게 GUI를 업데이트하기 위해 `update_idletasks`를 사용합니다.
+
+    Args:
+        message (str): 로그에 표시할 메시지.
+    """
     log_text.insert(tk.END, message + "\n")
     log_text.see(tk.END)
     root.update_idletasks()
 
 
+
+def create_text_file(download_path, content, file_name="list_url.txt"):
+    """지정된 경로에 텍스트 파일을 생성하고 내용을 씁니다.
+
+    주로 크롤링 대상이 된 목록 페이지의 URL을 저장하는 데 사용됩니다.
+    파일이 이미 존재하면 아무 작업도 수행하지 않습니다.
+
+    Args:
+        download_path (str): 파일이 생성될 디렉터리 경로.
+        content (str): 파일에 쓸 내용.
+        file_name (str): 생성할 파일의 이름.
+    """
+    abs_path = os.path.join(download_path, file_name)
+    
+    # 파일이 존재하는지 확인
+    if not os.path.exists(abs_path):
+        with open(abs_path, 'w') as file:
+            file.write(content)
+
+
 def browse_directory():
-    """Opens a dialog to select a download directory."""
+    """다운로드 경로를 선택하기 위한 파일 탐색기 대화상자를 엽니다.
+
+    사용자가 디렉터리를 선택하면 해당 경로를 GUI의 다운로드 경로 입력 필드에
+    자동으로 채웁니다.
+    """
     path = filedialog.askdirectory()
     if path:
         download_path_entry.delete(0, tk.END)
@@ -41,7 +71,16 @@ def browse_directory():
 
 
 # --- Crawler Functions ---
-def scroll_to_bottom_with_pagedown(driver, max_scrolls=80, sleep_time=0.2):
+def scroll_to_bottom_with_pagedown(driver, max_scrolls=500, sleep_time=0.2):
+    """Selenium 드라이버를 사용하여 PAGE_DOWN 키를 보내 페이지를 아래로 스크롤합니다.
+
+    스크롤이 더 이상 진행되지 않거나 최대 스크롤 횟수에 도달하면 중단됩니다.
+
+    Args:
+        driver: Selenium 웹 드라이버 인스턴스.
+        max_scrolls (int): 최대 스크롤 횟수.
+        sleep_time (float): 각 스크롤 사이의 대기 시간(초).
+    """
     # log("페이지의 끝까지 스크롤을 시작합니다...")
     body = driver.find_element(By.TAG_NAME, "body")
     scroll_count = 0
@@ -60,6 +99,15 @@ def scroll_to_bottom_with_pagedown(driver, max_scrolls=80, sleep_time=0.2):
 
 
 def handle_captcha(driver, worker_id):
+    """캡챠 페이지를 감지하고 사용자가 직접 해결할 때까지 대기합니다.
+
+    현재 URL에 'bbs/captcha.php'가 포함되어 있으면 캡챠 페이지로 간주하고,
+    사용자가 해결하여 URL이 변경될 때까지 5초 간격으로 확인합니다.
+
+    Args:
+        driver: Selenium 웹 드라이버 인스턴스.
+        worker_id (int): 현재 작업을 수행 중인 워커의 ID.
+    """
     while "bbs/captcha.php" in driver.current_url and not stop_event.is_set():
         log(f"워커 {worker_id}: !! 캡챠 페이지가 감지되었습니다 !! 브라우저에서 직접 해결해주세요.")
         while "bbs/captcha.php" in driver.current_url:
@@ -70,12 +118,28 @@ def handle_captcha(driver, worker_id):
 
 
 def crawl_worker(worker_id, base_download_path, url_list):
-    """The function each thread will execute to crawl pages."""
+    """개별 크롤러 스레드가 실행하는 메인 함수입니다.
+
+    주어진 URL 목록을 순회하며 각 페이지의 이미지를 다운로드하고 저장합니다.
+    캡챠 처리, 중복 URL 건너뛰기, 이미지 다운로드 로직을 포함합니다.
+
+    Args:
+        worker_id (int): 현재 작업을 수행 중인 워커의 ID.
+        base_download_path (str): 이미지를 저장할 기본 경로.
+        url_list (list): 이 워커가 크롤링할 URL 목록.
+
+    Returns:
+        list: 각 URL에 대한 크롤링 결과(성공, 실패, 중지 등)를 담은 사전 목록.
+    """
+    result = []
+
+    if not url_list:
+        return result
+
     time.sleep(worker_id * 5)  # Stagger driver initialization
+
     driver = None
     try:
-
-        result = []
 
         driver = Driver(uc=True, headless=False)
         while not stop_event.is_set():
@@ -85,9 +149,9 @@ def crawl_worker(worker_id, base_download_path, url_list):
                     continue  # Check stop_event again
 
                 try:
-                    # if is_url_crawled(url):
-                    #     log(f"워커 {worker_id}: 이미 크롤링된 URL입니다: {url}")
-                    #     continue
+                    if is_url_crawled(url):
+                        log(f"워커 {worker_id}: 이미 크롤링된 URL입니다: {url}")
+                        continue
 
                     log(f"워커 {worker_id}: Navigating to: {url}")
                     driver.get(url)
@@ -149,9 +213,9 @@ def crawl_worker(worker_id, base_download_path, url_list):
 
                 except Exception as e:
                     log(f"워커 {worker_id}: [FAIL] 처리 중 오류 발생 {url}. {e}")
-                    result.append({"state": "FAIL", "message": f"[FAIL] 처리 중 오류 발생. {e}", "title": post_title, "url": url})
-        # future 반환
-        return result
+                    result.append({"state": "FAIL", "message": f"[FAIL] 처리 중 오류 발생. {e}", "title": "", "url": url})
+            # future 반환
+            return result
     finally:
         if driver:
             driver.quit()
@@ -159,6 +223,15 @@ def crawl_worker(worker_id, base_download_path, url_list):
 
 
 def get_target_pages(driver, target_url):
+    """만화 목록 페이지에서 모든 개별 에피소드 페이지의 URL을 추출합니다.
+
+    Args:
+        driver: Selenium 웹 드라이버 인스턴스.
+        target_url (str): 크롤링할 만화의 메인 목록 페이지 URL.
+
+    Returns:
+        list: 추출된 모든 에피소드 URL의 목록. 실패 시 빈 목록을 반환합니다.
+    """
     try:
         log(f"크롤링 대상 목록을 조회합니다: {target_url}")
         driver.get(target_url)
@@ -183,6 +256,12 @@ def get_target_pages(driver, target_url):
 
 
 def master_crawl_thread():
+    """크롤링 작업을 총괄하는 메인 스레드 함수입니다.
+
+    GUI에서 입력된 정보를 바탕으로 크롤링을 설정하고, 작업자 스레드를 생성하여
+    URL 목록을 분배하고 실행합니다. 모든 작업이 완료되거나 중지될 때까지
+    전체 크롤링 프로세스를 관리합니다.
+    """
     target_url = url_entry.get()
     if not target_url:
         messagebox.showerror("오류", "URL을 입력하세요.")
@@ -231,6 +310,9 @@ def master_crawl_thread():
         stop_button.config(state=tk.DISABLED)
         return
 
+    # target list url의 txt 파일 생성. 참고용
+    create_text_file(download_path, target_url)
+
     # 수집된 URL 중 이미 수집된 URL 제외
     total_articles = len(article_urls)
     crawled_urls = 0
@@ -244,10 +326,17 @@ def master_crawl_thread():
 
     target_article_num = len(target_article_urls)
 
-    # for url in target_article_urls:
-    #     crawl_queue.put(url)
+
+
 
     log(f"총 {total_articles}개중 이미 수집완료된 {crawled_urls}개는 제외합니다.")
+
+    if target_article_num <= 0:
+        log("크롤링할 에피소드가 없습니다.")
+        start_button.config(state=tk.NORMAL)
+        stop_button.config(state=tk.DISABLED)
+        return
+
     log(f"{len(target_article_urls)}개의 작업을 {num_threads}개의 스레드로 시작합니다.")
 
     completed_tasks = 0
@@ -278,17 +367,16 @@ def master_crawl_thread():
             completed_tasks += 1
             try:
                 # 워커의 return 값을 가져옵니다.
-                result_list = future.result()
-                for result in result_list:
-                    if result["status"] == "SUCCESS":
+                for result in future.result():
+                    if result["state"] == "SUCCESS":
                         success_count += 1
-                        log(f"[성공] {result["message"]}")
                     elif result["status"] == "FAILED":
                         failed_count += 1
-                        log(f"[실패] {result["message"]}")
                     elif result["status"] == "SKIPPED":
                         # 이 경우는 미리 필터링해서 발생하지 않지만, 안정성을 위해 둡니다.
                         log(f"[건너뜀] {result["message"]}")
+
+                log(f"성공: {success_count}, 실패: {failed_count}")
 
             except Exception as exc:
                 # future.result() 자체에서 예외가 발생한 경우 (매우 드묾)
@@ -296,8 +384,11 @@ def master_crawl_thread():
                 log(f"[치명적 오류] {future_to_url[future]}: {exc}")
 
             # 진행률을 정확하게 업데이트
-            progress = (completed_tasks / target_article_num) * 100
-            progress_bar['value'] = progress
+            if not target_article_num == 0:
+                progress = (completed_tasks / target_article_num) * 100
+                progress_bar['value'] = progress
+            else:
+                progress_bar['value'] = 100
 
     if not stop_event.is_set():
         progress_bar['value'] = 100
@@ -309,10 +400,15 @@ def master_crawl_thread():
 
     start_button.config(state=tk.NORMAL)
     stop_button.config(state=tk.DISABLED)
-    progress_bar['value'] = 0
+
 
 
 def start_crawling():
+    """'시작' 버튼을 클릭했을 때 호출되는 함수입니다.
+
+    `master_crawl_thread`를 별도의 데몬 스레드로 생성하고 시작하여
+    GUI가 멈추지 않도록 합니다.
+    """
     global master_thread
     master_thread = threading.Thread(target=master_crawl_thread)
     master_thread.daemon = True
@@ -320,17 +416,28 @@ def start_crawling():
 
 
 def stop_crawling():
+    """'중지' 버튼을 클릭했을 때 호출되는 함수입니다.
+
+    `stop_event`를 설정하여 모든 활성 스레드(마스터 및 워커)에
+    중지 신호를 보냅니다.
+    """
     if master_thread and master_thread.is_alive():
         log("크롤링 중지를 요청했습니다...")
         stop_event.set()
 
 
 def on_closing():
+    """GUI 창을 닫을 때 호출되는 함수입니다.
+
+    사용자에게 종료 여부를 확인하고, 진행 중인 크롤링 스레드가
+    안전하게 종료될 수 있도록 `stop_event`를 설정한 후 창을 닫습니다.
+    """
     if messagebox.askokcancel("종료", "크롤러를 종료하시겠습니까?"):
         stop_event.set()
         if master_thread and master_thread.is_alive():
             master_thread.join()
         root.destroy()
+
 
 
 # --- UI Setup ---

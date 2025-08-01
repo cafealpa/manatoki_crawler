@@ -2,3 +2,5 @@
 /.idea/
 /.venv/
 /crawled_pages.db
+/build/
+/dist/
