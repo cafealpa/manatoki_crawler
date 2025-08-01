@@ -2,8 +2,8 @@ import concurrent.futures
 import mimetypes
 import os
 import random
-import threading
 import time
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -47,7 +47,7 @@ def handle_captcha(driver, worker_id, log_callback, stop_event):
         time.sleep(2)
 
 
-def crawl_worker(worker_id, base_download_path, url_list, log_callback, stop_event):
+def crawl_worker(worker_id, base_download_path, referer_url, url_list, log_callback, stop_event):
     result = []
     if not url_list:
         return result
@@ -104,7 +104,7 @@ def crawl_worker(worker_id, base_download_path, url_list, log_callback, stop_eve
                             img_url = img.get('src')
                             if img_url and '.gif' not in img_url.lower():
                                 try:
-                                    header = {'referer': 'https://manatoki468.net/'}
+                                    header = {'referer': referer_url}
                                     response = requests.get(img_url, stream=True, headers=header, timeout=30)
                                     response.raise_for_status()
 
@@ -174,7 +174,10 @@ def master_crawl_thread(params, gui_queue, stop_event):
     target_url = params['target_url']
     download_path = params['download_path']
 
-    num_threads = 3;
+    parsed_uri = urlparse(target_url)
+    referer_url = f'{parsed_uri.scheme}://{parsed_uri.netloc}/'
+
+    num_threads = 3
     if 'num_threads' in params and isinstance(params['num_threads'], str) and params['num_threads'].isdigit():
         num_threads = int(params['num_threads'])
     else:
@@ -230,7 +233,7 @@ def master_crawl_thread(params, gui_queue, stop_event):
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
         future_to_url = {
-            executor.submit(crawl_worker, worker_id, download_path, url_list_for_worker, log_callback, stop_event): url_list_for_worker
+            executor.submit(crawl_worker, worker_id, download_path, referer_url, url_list_for_worker, log_callback, stop_event): url_list_for_worker
             for worker_id, url_list_for_worker in worker_urls.items()
         }
 
