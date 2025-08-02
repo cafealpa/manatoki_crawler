@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import os
 import queue
+from db_viewer import DBViewer
 
 class CrawlerApp(tk.Toplevel):
     def __init__(self, master, start_callback, stop_callback, on_close_callback):
@@ -20,6 +21,10 @@ class CrawlerApp(tk.Toplevel):
     def _create_widgets(self):
         # --- Menu Bar ---
         menu_bar = tk.Menu(self)
+        tool_menu = tk.Menu(menu_bar, tearoff=0)
+        tool_menu.add_command(label="DB 확인", command=self.open_db_viewer)
+        menu_bar.add_cascade(label="도구", menu=tool_menu)
+
         etc_menu = tk.Menu(menu_bar, tearoff=0)
         etc_menu.add_command(label="버전확인", command=self.show_version)
         menu_bar.add_cascade(label="기타", menu=etc_menu)
@@ -108,6 +113,9 @@ class CrawlerApp(tk.Toplevel):
 
     def show_version(self):
         messagebox.showinfo("버전 정보", "마나토끼 마나토끼 수집기 v1.0.1")
+
+    def open_db_viewer(self):
+        DBViewer(self)
 
     def get_params(self):
         """UI에서 파라미터를 가져와 딕셔너리로 반환합니다."""

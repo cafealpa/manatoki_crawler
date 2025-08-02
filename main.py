@@ -39,7 +39,7 @@ class MainApplication:
 
     def stop_crawling(self):
         if self.master_thread and self.master_thread.is_alive():
-            self.app.log("크롤링 중지를 요청했습니다...")
+            self.app.log("수집 중지를 요청했습니다...")
             self.stop_event.set()
 
     def on_closing(self):
