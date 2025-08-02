@@ -28,14 +28,14 @@ def create_table():
         conn.commit()
 
 def is_url_crawled(url):
-    """주어진 URL이 이미 크롤링되었는지 확인합니다."""
+    """주어진 URL이 이미 수집되었는지 확인합니다."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT 1 FROM crawled_urls WHERE url = ?", (url,))
         return cursor.fetchone() is not None
 
 def add_crawled_url(url, page_title):
-    """크롤링 완료된 URL을 데이터베이스에 추가합니다."""
+    """수집 완료된 URL을 데이터베이스에 추가합니다."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         try:
@@ -45,6 +45,20 @@ def add_crawled_url(url, page_title):
         except sqlite3.IntegrityError:
             # UNIQUE 제약 조건으로 인해 이미 존재하는 URL은 무시됩니다.
             print(f"이미 데이터베이스에 존재: {url}")
+
+
+def delete_crawled_urls_by_ids(ids):
+    """주어진 ID 목록에 해당하는 수집된 URL들을 삭제합니다."""
+    if not ids:
+        return 0
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ','.join('?' for _ in ids)
+        query = f"DELETE FROM crawled_urls WHERE id IN ({placeholders})"
+        cursor.execute(query, ids)
+        conn.commit()
+        print(f"{cursor.rowcount}개의 항목이 데이터베이스에서 삭제되었습니다.")
+        return cursor.rowcount
 
 # 애플리케이션 시작 시 테이블이 없는 경우 생성
 create_table()

@@ -10,5 +10,5 @@
 - Selenium (SeleniumBase 사용 - 봇 체크 우회)
 
 
-크롤링 대상 페이지는
+수집 대상 페이지는
 https://manatoki468.net/comic/2786463

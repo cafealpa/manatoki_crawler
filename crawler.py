@@ -64,7 +64,7 @@ def crawl_worker(worker_id, base_download_path, referer_url, url_list, log_callb
 
                 try:
                     if is_url_crawled(url):
-                        log_callback(f"워커 {worker_id}: 이미 크롤링된 URL입니다: {url}")
+                        log_callback(f"워커 {worker_id}: 이미 수집된 URL입니다: {url}")
                         continue
 
                     log_callback(f"워커 {worker_id}: Navigating to: {url}")
@@ -118,7 +118,7 @@ def crawl_worker(worker_id, base_download_path, referer_url, url_list, log_callb
 
                         if not stop_event.is_set():
                             add_crawled_url(url, post_title)
-                            log_callback(f"워커 {worker_id}: [SUCCESS] 크롤링 완료 - {post_title}")
+                            log_callback(f"워커 {worker_id}: [SUCCESS] 수집 완료 - {post_title}")
                             result.append({"state": "SUCCESS", "message": "성공", "title": post_title, "url": url})
                     else:
                         log_callback(f"워커 {worker_id}: [FAIL] mana_section이 없습니다. {url}")
@@ -136,7 +136,7 @@ def crawl_worker(worker_id, base_download_path, referer_url, url_list, log_callb
 
 def get_target_pages(driver, target_url, log_callback):
     try:
-        log_callback(f"크롤링 대상 목록을 조회합니다: {target_url}")
+        log_callback(f"수집 대상 목록을 조회합니다: {target_url}")
         driver.get(target_url)
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "article[itemprop='articleBody']"))
@@ -184,7 +184,7 @@ def master_crawl_thread(params, gui_queue, stop_event):
         # 위의 조건에 맞지 않으면 기본값을 사용합니다.
         print("Warning: 'num_threads' value is not a positive integer string. Using default value.")
 
-    log_callback("크롤링을 시작합니다...")
+    log_callback("수집을 시작합니다...")
 
     list_driver = None
     try:
@@ -195,7 +195,7 @@ def master_crawl_thread(params, gui_queue, stop_event):
             list_driver.quit()
 
     if not article_urls:
-        log_callback("크롤링할 에피소드가 없습니다.")
+        log_callback("수집할 에피소드가 없습니다.")
         on_complete_callback(False)
         return
 
@@ -216,7 +216,7 @@ def master_crawl_thread(params, gui_queue, stop_event):
     log_callback(f"총 {total_articles}개중 이미 수집완료된 {crawled_urls}개는 제외합니다.")
 
     if target_article_num <= 0:
-        log_callback("크롤링할 에피소드가 없습니다.")
+        log_callback("수집할 에피소드가 없습니다.")
         on_complete_callback(False)
         return
 
@@ -262,10 +262,10 @@ def master_crawl_thread(params, gui_queue, stop_event):
 
     if not stop_event.is_set():
         update_progress_callback(100)
-        log_callback("\n\n🎉🎉🎉 모든 크롤링 작업이 완료되었습니다.")
-        show_info_callback("크롤링이 완료되었습니다.")
+        log_callback("\n\n🎉🎉🎉 모든 수집 작업이 완료되었습니다.")
+        show_info_callback("수집이 완료되었습니다.")
     else:
-        log_callback("크롤링 작업이 중지되었습니다.")
-        show_info_callback("크롤링이 중지되었습니다.")
+        log_callback("수집 작업이 중지되었습니다.")
+        show_info_callback("수집이 중지되었습니다.")
 
     on_complete_callback(True)
