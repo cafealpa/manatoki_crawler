@@ -2,7 +2,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox
 
-from crawler import master_crawl_thread
+from crawler.crawler import master_crawl_thread
 from gui import CrawlerApp
 
 

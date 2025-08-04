@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import os
 import queue
-from db_viewer import DBViewer
+from db_viewer.db_viewer import DBViewer
 
 class CrawlerApp(tk.Toplevel):
     def __init__(self, master, start_callback, stop_callback, on_close_callback):
@@ -112,7 +112,7 @@ class CrawlerApp(tk.Toplevel):
                     self.log(f"'list_url.txt' 파일 읽기 오류: {e}")
 
     def show_version(self):
-        messagebox.showinfo("버전 정보", "마나토끼 마나토끼 수집기 v1.1.0")
+        messagebox.showinfo("버전 정보", "마나토끼 마나토끼 수집기 v1.1.1")
 
     def open_db_viewer(self):
         DBViewer(self)
