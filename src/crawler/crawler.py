@@ -1,11 +1,15 @@
 import concurrent.futures
+import io
 import mimetypes
 import os
 import random
+import re
 import time
 from urllib.parse import urlparse
 
+import google.generativeai as genai
 import requests
+from PIL import Image
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -16,12 +20,45 @@ from seleniumbase import Driver
 from database import is_url_crawled, add_crawled_url
 
 
+def gemini_ocr(captcha_img_data, log_callback):
+    """Gemini Vision API를 사용하여 이미지의 숫자를 인식합니다."""
+    # --- GEMINI API 설정 --- #
+    # 1. Google AI Studio에서 API 키를 발급받으세요: https://aistudio.google.com/app/apikey
+    # 2. 아래 "YOUR_API_KEY" 부분을 자신의 API 키로 교체하세요.
+    # 3. 터미널에서 `pip install google-generativeai Pillow` 를 실행하여 라이브러리를 설치하세요.
+    # ---------------------- #
+    API_KEY = "YOUR_API_KEY"
+
+    if API_KEY == "YOUR_API_KEY":
+        log_callback("워커: Gemini API 키가 설정되지 않았습니다. OCR을 건너뜁니다.")
+        return None
+
+    try:
+        genai.configure(api_key=API_KEY)
+        model = genai.GenerativeModel('gemini-2.0-flash')
+
+        # API에 전송하기 위해 이미지 다운로드
+        image = Image.open(io.BytesIO(captcha_img_data))
+
+        # Gemini API 호출
+        ocr_response = model.generate_content(["이 이미지에서 보이는 4자리 숫자를 추출해줘.", image])
+
+        # OCR 결과에서 숫자만 추출
+        cleaned_text = re.sub(r'\D', '', ocr_response.text)
+        return cleaned_text
+
+    except ImportError:
+        log_callback("OCR을 사용하려면 'google-generativeai'와 'Pillow' 라이브러리가 필요합니다.")
+        return None
+    except Exception as e:
+        log_callback(f"Gemini API 호출 중 오류 발생: {e}")
+        return None
+
 def create_text_file(download_path, content, file_name="list_url.txt"):
     abs_path = os.path.join(download_path, file_name)
     if not os.path.exists(abs_path):
         with open(abs_path, 'w') as file:
             file.write(content)
-
 
 def scroll_to_bottom_with_pagedown(driver, stop_event, max_scrolls=500, sleep_time=0.2):
     body = driver.find_element(By.TAG_NAME, "body")
@@ -36,16 +73,48 @@ def scroll_to_bottom_with_pagedown(driver, stop_event, max_scrolls=500, sleep_ti
             break
     time.sleep(2)
 
-
 def handle_captcha(driver, worker_id, log_callback, stop_event):
-    while "bbs/captcha.php" in driver.current_url and not stop_event.is_set():
-        log_callback(f"워커 {worker_id}: !! 캡챠 페이지가 감지되었습니다 !! 브라우저에서 직접 해결해주세요.")
-        while "bbs/captcha.php" in driver.current_url:
-            time.sleep(5)
-            if stop_event.is_set(): return
-        log_callback(f"워커 {worker_id}: 캡챠가 해결되었습니다.")
-        time.sleep(2)
+    max_retries = 3
+    for i in range(max_retries):
+        if "bbs/captcha.php" not in driver.current_url or stop_event.is_set():
+            return
 
+        log_callback(f"워커 {worker_id}: !! 캡챠 페이지가 감지되었습니다 !! (자동 해결 시도 {i + 1}/{max_retries})")
+        try:
+            captcha_img = driver.find_element(By.CSS_SELECTOR, "img[src*='kcaptcha_image.php']")
+
+            log_callback(f"워커 {worker_id}: OCR을 위해 캡챠 URL을 찾았습니다")
+            captcha_img_data = captcha_img.screenshot_as_png
+            captcha_code = gemini_ocr(captcha_img_data, log_callback)
+
+            if captcha_code and captcha_code.isdigit():
+                log_callback(f"워커 {worker_id}: OCR 결과: {captcha_code}")
+                key_input = driver.find_element(By.NAME, "captcha_key")
+                key_input.clear()
+                key_input.send_keys(captcha_code)
+
+                # driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+                driver.find_element(By.XPATH, "//button[@type='submit' and text()='Check']").click()
+                time.sleep(2)
+
+                if "bbs/captcha.php" not in driver.current_url:
+                    log_callback(f"워커 {worker_id}: 캡챠가 성공적으로 해결되었습니다.")
+                    return
+                else:
+                    log_callback(f"워커 {worker_id}: 캡챠 해결 실패. 재시도합니다.")
+            else:
+                log_callback(f"워커 {worker_id}: OCR에 실패했거나 유효하지 않은 코드입니다. 캡챠 이미지를 새로고침하고 재시도합니다.")
+                driver.find_element(By.CSS_SELECTOR, "img[src*='kcaptcha_image.php']").click()
+                time.sleep(2)
+
+        except Exception as e:
+            log_callback(f"워커 {worker_id}: 캡챠 처리 중 오류 발생: {e}. 페이지를 새로고침하고 재시도합니다.")
+            driver.refresh()
+            time.sleep(5)
+
+    log_callback(f"워커 {worker_id}: 캡챠 자동 해결에 {max_retries}회 실패했습니다. 수동으로 해결해주세요.")
+    while "bbs/captcha.php" in driver.current_url and not stop_event.is_set():
+        time.sleep(5)
 
 def crawl_worker(worker_id, base_download_path, referer_url, url_list, log_callback, stop_event):
     result = []
@@ -70,12 +139,18 @@ def crawl_worker(worker_id, base_download_path, referer_url, url_list, log_callb
                     log_callback(f"워커 {worker_id}: Navigating to: {url}")
                     driver.get(url)
 
+
+                    combined_css_selector = "article[itemprop='articleBody'], img[src*='kcaptcha_image.php']"
+
                     WebDriverWait(driver, 30).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "article[itemprop='articleBody']"))
+                        EC.presence_of_element_located((By.CSS_SELECTOR, combined_css_selector))
                     )
 
-                    handle_captcha(driver, worker_id, log_callback, stop_event)
-                    if stop_event.is_set(): break
+                    if stop_event.is_set():
+                        break
+
+                    if "bbs/captcha.php" in driver.current_url:
+                        handle_captcha(driver, worker_id, log_callback, stop_event)
 
                     scroll_to_bottom_with_pagedown(driver, stop_event)
 
@@ -100,7 +175,8 @@ def crawl_worker(worker_id, base_download_path, referer_url, url_list, log_callb
                         log_callback(f"워커 {worker_id}: Found {len(img_tags)} images.")
 
                         for i, img in enumerate(img_tags):
-                            if stop_event.is_set(): break
+                            if stop_event.is_set():
+                                break
                             img_url = img.get('src')
                             if img_url and '.gif' not in img_url.lower():
                                 try:
@@ -133,7 +209,6 @@ def crawl_worker(worker_id, base_download_path, referer_url, url_list, log_callb
             driver.quit()
         log_callback(f"워커 {worker_id}: 종료")
 
-
 def get_target_pages(driver, target_url, log_callback):
     try:
         log_callback(f"수집 대상 목록을 조회합니다: {target_url}")
@@ -157,19 +232,18 @@ def get_target_pages(driver, target_url, log_callback):
         log_callback(f"목록 페이지 로딩 중 에러가 발생했습니다: {e}")
         return []
 
-
 def master_crawl_thread(params, gui_queue, stop_event):
     def log_callback(message):
-        gui_queue.put(('log', message))
+        gui_queue.put(("log", message))
 
     def update_progress_callback(progress):
-        gui_queue.put(('progress', progress))
+        gui_queue.put(("progress", progress))
 
     def on_complete_callback(success):
-        gui_queue.put(('complete', success))
+        gui_queue.put(("complete", success))
 
     def show_info_callback(message):
-        gui_queue.put(('show_info', message))
+        gui_queue.put(("show_info", message))
 
     target_url = params['target_url']
     download_path = params['download_path']
@@ -181,7 +255,6 @@ def master_crawl_thread(params, gui_queue, stop_event):
     if 'num_threads' in params and isinstance(params['num_threads'], str) and params['num_threads'].isdigit():
         num_threads = int(params['num_threads'])
     else:
-        # 위의 조건에 맞지 않으면 기본값을 사용합니다.
         print("Warning: 'num_threads' value is not a positive integer string. Using default value.")
 
     log_callback("수집을 시작합니다...")

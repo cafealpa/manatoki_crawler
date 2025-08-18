@@ -112,7 +112,7 @@ class CrawlerApp(tk.Toplevel):
                     self.log(f"'list_url.txt' 파일 읽기 오류: {e}")
 
     def show_version(self):
-        messagebox.showinfo("버전 정보", "마나토끼 마나토끼 수집기 v1.1.1")
+        messagebox.showinfo("버전 정보", "마나토끼 마나토끼 수집기 v1.1.2")
 
     def open_db_viewer(self):
         DBViewer(self)
