@@ -13,8 +13,8 @@ def get_db_connection():
     finally:
         conn.close()
 
-def create_table():
-    """'crawled_urls' 테이블을 생성합니다."""
+def create_tables():
+    """'crawled_urls'와 'app_config' 테이블을 생성합니다."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -25,6 +25,27 @@ def create_table():
                 crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS app_config (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        conn.commit()
+
+def get_app_config(key):
+    """app_config 테이블에서 값을 가져옵니다."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM app_config WHERE key = ?", (key,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+def set_app_config(key, value):
+    """app_config 테이블에 값을 저장합니다."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
 
 def is_url_crawled(url):
@@ -61,4 +82,4 @@ def delete_crawled_urls_by_ids(ids):
         return cursor.rowcount
 
 # 애플리케이션 시작 시 테이블이 없는 경우 생성
-create_table()
+create_tables()

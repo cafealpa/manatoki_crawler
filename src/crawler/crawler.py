@@ -17,7 +17,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from seleniumbase import Driver
 
-from database import is_url_crawled, add_crawled_url
+# from database import is_url_crawled, add_crawled_url, get_app_config
+import database as DB
 
 
 def gemini_ocr(captcha_img_data, log_callback):
@@ -27,7 +28,7 @@ def gemini_ocr(captcha_img_data, log_callback):
     # 2. 아래 "YOUR_API_KEY" 부분을 자신의 API 키로 교체하세요.
     # 3. 터미널에서 `pip install google-generativeai Pillow` 를 실행하여 라이브러리를 설치하세요.
     # ---------------------- #
-    API_KEY = "YOUR_API_KEY"
+    API_KEY = DB.get_app_config()
 
     if API_KEY == "YOUR_API_KEY":
         log_callback("워커: Gemini API 키가 설정되지 않았습니다. OCR을 건너뜁니다.")
@@ -132,7 +133,7 @@ def crawl_worker(worker_id, base_download_path, referer_url, url_list, log_callb
                     continue
 
                 try:
-                    if is_url_crawled(url):
+                    if DB.is_url_crawled(url):
                         log_callback(f"워커 {worker_id}: 이미 수집된 URL입니다: {url}")
                         continue
 
@@ -193,7 +194,7 @@ def crawl_worker(worker_id, base_download_path, referer_url, url_list, log_callb
                                     log_callback(f"워커 {worker_id}: Error downloading {img_url}: {req_err}")
 
                         if not stop_event.is_set():
-                            add_crawled_url(url, post_title)
+                            DB.add_crawled_url(url, post_title)
                             log_callback(f"워커 {worker_id}: [SUCCESS] 수집 완료 - {post_title}")
                             result.append({"state": "SUCCESS", "message": "성공", "title": post_title, "url": url})
                     else:
@@ -279,7 +280,7 @@ def master_crawl_thread(params, gui_queue, stop_event):
     target_article_urls = []
 
     for url in article_urls:
-        if is_url_crawled(url):
+        if DB.is_url_crawled(url):
             crawled_urls += 1
         else:
             target_article_urls.append(url)
